@@ -86,3 +86,8 @@ cole https://github.com/ReahPlatform/reah-agent/pull/313        # 请求 review
 cole --re https://github.com/ReahPlatform/reah-agent/pull/313   # 在原 thread 里请求 re-review
 ```
 re-review 会按 `<repo>/pull/<号>` 找到该 PR 的既有 review thread，在其中回复。
+
+### chrome-access
+用 Chrome DevTools Protocol（CDP）驱动本地 Chrome：读 DOM、跑 JS、抓无障碍树、
+点击/填表/导航、截图。纯指令 skill（无脚本依赖）。详见
+[`skills/chrome-access/SKILL.md`](skills/chrome-access/SKILL.md)。
