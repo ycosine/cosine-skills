@@ -56,3 +56,13 @@ notify-me --no-mention 已开始长任务，完成后再 @ 你   # 只记录、�
 ```
 默认发到 `#mole-tasks` 并 @ 你；可用 `NOTIFY_CHANNEL` / `NOTIFY_USER_ID` /
 `NOTIFY_AS` 覆盖。
+
+### cole-review（cole）
+触发 Cole（review 机器人）在 `#dev-review` 审 PR。只发触发消息，不参与 review。
+详见 [`skills/cole-review/SKILL.md`](skills/cole-review/SKILL.md)。
+
+```bash
+cole https://github.com/ReahPlatform/reah-agent/pull/313        # 请求 review
+cole --re https://github.com/ReahPlatform/reah-agent/pull/313   # 在原 thread 里请求 re-review
+```
+re-review 会按 `<repo>/pull/<号>` 找到该 PR 的既有 review thread，在其中回复。

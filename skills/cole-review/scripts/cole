@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""cole — trigger Cole (the review bot) on a PR in the #dev-review channel.
+
+This skill ONLY sends the trigger message; it does not perform any review.
+
+  cole <pr-url>            post a top-level "@Cole review <url>" request
+  cole --re <pr-url>       find that PR's existing review thread and post
+                           "@Cole re-review" inside it
+
+Overridable via env:
+  COLE_CHANNEL  target channel (default C0AL1106NJJ / #dev-review)
+  COLE_MENTION  who to @ (default U0AKFDZUYKH / Cole) — ID or alias
+  SLACK_CLI     path to the slack CLI
+"""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+SLACK = os.environ.get("SLACK_CLI", os.path.expanduser("~/.claude/skills/slack/scripts/slack"))
+CHANNEL = os.environ.get("COLE_CHANNEL", "C0AL1106NJJ")
+COLE = os.environ.get("COLE_MENTION", "U0AKFDZUYKH")
+HISTORY_LIMIT = int(os.environ.get("COLE_HISTORY_LIMIT", "200"))
+
+PR_RE = re.compile(r"github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)")
+
+
+def die(msg, **extra):
+    print(json.dumps({"ok": False, "error": msg, **extra}, ensure_ascii=False), file=sys.stderr)
+    sys.exit(1)
+
+
+def slack(*args):
+    """Run the slack CLI and return its parsed JSON, or exit on failure."""
+    r = subprocess.run([SLACK, *args], capture_output=True, text=True)
+    try:
+        out = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        die(f"slack CLI gave no JSON: {(r.stdout or r.stderr).strip()[:300]}")
+    if not out.get("ok"):
+        die(f"slack CLI error: {out.get('error')}", slack=out)
+    return out
+
+
+def pr_parts(url):
+    m = PR_RE.search(url or "")
+    return (m.group(1), m.group(2)) if m else (None, None)  # (repo, number)
+
+
+def cmd_review(url):
+    out = slack("post", "--channel", CHANNEL, "--mention", COLE, "--text", f"review {url}")
+    print(json.dumps(
+        {"ok": True, "action": "review", "pr": url, "ts": out["ts"],
+         "permalink": out.get("permalink")},
+        ensure_ascii=False, indent=2))
+
+
+def cmd_rereview(url):
+    repo, num = pr_parts(url)
+    if not repo:
+        die(f"not a recognizable GitHub PR url: {url!r}")
+    # Find the most recent top-level message in the channel that references this PR.
+    needle = re.compile(rf"{re.escape(repo)}/pull/{num}(?![0-9])")
+    hist = slack("read", "--channel", CHANNEL, "--limit", str(HISTORY_LIMIT))
+    root = next((m for m in hist["messages"] if needle.search(m.get("text") or "")), None)
+    if not root:
+        die(f"no existing review thread found for {repo}#{num} in the last "
+            f"{HISTORY_LIMIT} messages — post a fresh review instead (drop --re).",
+            pr=url)
+    out = slack("post", "--channel", CHANNEL, "--thread", root["ts"],
+                "--mention", COLE, "--text", "re-review")
+    print(json.dumps(
+        {"ok": True, "action": "re-review", "pr": url, "thread_ts": root["ts"],
+         "permalink": out.get("permalink")},
+        ensure_ascii=False, indent=2))
+
+
+def main():
+    p = argparse.ArgumentParser(prog="cole", description="Trigger Cole to review a PR.")
+    p.add_argument("url", help="GitHub PR URL")
+    p.add_argument("--re-review", "--re", dest="rereview", action="store_true",
+                   help="Re-review: post into the PR's existing review thread")
+    args = p.parse_args()
+    (cmd_rereview if args.rereview else cmd_review)(args.url)
+
+
+if __name__ == "__main__":
+    main()
