@@ -8,10 +8,30 @@
 ./install.sh
 ```
 
-会把 `skills/<name>/` 软链接到 `~/.claude/skills/<name>`（改代码即时生效），
-并为声明了 `requirements.txt` 的 skill 创建独立的 `.venv` 安装依赖。
+`install.sh` 会（可反复运行，幂等、不覆盖已有配置）：
+1. 把 `skills/<name>/` 软链接到 `~/.claude/skills/<name>`（改代码即时生效）；
+2. 为声明了 `requirements.txt` 的 skill 建独立 `.venv` 装依赖；
+3. 若 `~/.config/slack-skill/{config.json,people.json}` 不存在，从仓库模板铺一份
+   （token 留空待填），并打印下一步指引。
 
-环境变量 `CLAUDE_SKILLS_DIR` 可覆盖目标目录。
+环境变量：`CLAUDE_SKILLS_DIR`（软链接目标）、`SLACK_SKILL_DIR`（配置目录）可覆盖。
+
+## 新电脑配置
+
+```bash
+git clone <repo-url> && cd sine
+./install.sh
+# 填入 Slack token（二选一）：
+$EDITOR ~/.config/slack-skill/config.json          # 直接改模板里的 user_token / bot_token
+slack setup --token xoxp-... [--bot-token xoxb-...] # 或用命令写入
+slack whoami                                        # 验证
+```
+
+> 仓库**不含 token**（`config.json` 在 .gitignore 里）。新机器上重新填一次即可；
+> token 是 workspace 级的，和旧机器一样。通讯录 `people.json` 会从模板预置
+> `xianjun`/`cole`，可继续 `slack people --add`。
+
+需要 `python3`、`git`。所有频道/用户 ID 等默认值是 workspace 级的，换机器不变。
 
 ## Skills
 

@@ -1,0 +1,11 @@
+{
+  "_guide_1": "Copy this to ~/.config/slack-skill/config.json (install.sh does it for you) and fill in the tokens. The loader only reads 'user_token' and 'bot_token'; every _guide_* field is ignored. Leave a value as \"\" if you don't have that token.",
+
+  "_guide_user_token": "REQUIRED. Slack App > OAuth & Permissions > 'User OAuth Token' (xoxp-). Acts AS YOU. User Token Scopes: chat:write, channels:read, groups:read, users:read, users:read.email, channels:history, groups:history, im:write, im:history, mpim:write, search:read, reactions:write.",
+  "user_token": "",
+
+  "_guide_bot_token": "OPTIONAL (only for `--as bot`). Same App > 'Bot User OAuth Token' (xoxb-). Acts AS THE APP/BOT. Bot Token Scopes: at least chat:write, plus users:read / users:read.email if the bot should @-mention people by name.",
+  "bot_token": "",
+
+  "_guide_after": "After filling: `slack whoami` (and `slack whoami --as bot` if set) to verify. File should be chmod 600."
+}

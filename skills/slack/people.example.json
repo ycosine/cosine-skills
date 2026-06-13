@@ -1,0 +1,5 @@
+{
+  "_guide": "Local alias table: name -> Slack user ID (U...). Lets you @-mention by alias (works even for a bot token without users:read, since it's a local lookup). Copied to ~/.config/slack-skill/people.json by install.sh if absent. Manage with `slack people --add name=U...`. User IDs are workspace-specific, not secret.",
+  "xianjun": "U09KQ7H9DDM",
+  "cole": "U0AKFDZUYKH"
+}
