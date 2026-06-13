@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Wrapper: run slack_cli.py with the skill's venv python if present.
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="$DIR/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3)"
+exec "$PY" "$DIR/scripts/slack_cli.py" "$@"

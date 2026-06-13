@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Notify the user: post a message to their Slack notification channel as the bot,
+# @-mentioning them so they get a real ping. Built on top of the `slack` skill.
+#
+# Override the target via env if needed:
+#   NOTIFY_CHANNEL  - channel ID/name to post into   (default: C0APEL4986R / mole-tasks)
+#   NOTIFY_USER_ID  - Slack user ID to @-mention      (default: U09KQ7H9DDM / xianjun)
+#   NOTIFY_AS       - identity: bot | user            (default: bot)
+#
+# Usage: notify-me [--no-mention] <message...>
+set -euo pipefail
+
+CHANNEL="${NOTIFY_CHANNEL:-C0APEL4986R}"
+MENTION_ID="${NOTIFY_USER_ID:-U09KQ7H9DDM}"
+AS="${NOTIFY_AS:-bot}"
+SLACK="${SLACK_CLI:-$HOME/.claude/skills/slack/scripts/slack}"
+
+mention=1
+if [ "${1:-}" = "--no-mention" ]; then
+  mention=0
+  shift
+fi
+
+MSG="$*"
+if [ -z "$MSG" ]; then
+  echo "usage: notify-me [--no-mention] <message>" >&2
+  exit 1
+fi
+
+if [ "$mention" = "1" ]; then
+  MSG="<@${MENTION_ID}> ${MSG}"
+fi
+
+exec "$SLACK" post --as "$AS" --channel "$CHANNEL" --text "$MSG"

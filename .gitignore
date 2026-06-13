@@ -1,0 +1,9 @@
+# per-skill virtualenvs created by install.sh
+skills/*/.venv/
+
+# python caches
+__pycache__/
+*.pyc
+
+# never commit tokens/config (these live in ~/.config/slack-skill anyway)
+config.json
