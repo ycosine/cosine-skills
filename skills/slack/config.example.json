@@ -7,5 +7,8 @@
   "_guide_bot_token": "OPTIONAL (only for `--as bot`). Same App > 'Bot User OAuth Token' (xoxb-). Acts AS THE APP/BOT. Bot Token Scopes: at least chat:write, plus users:read / users:read.email if the bot should @-mention people by name.",
   "bot_token": "",
 
+  "_guide_trigger_token": "OPTIONAL. A user token (xoxp-) from a SEPARATE Slack App that has ONLY User Token Scopes and NO bot user. Used by the cole-review skill: messages from a bot-less app carry app_id but NOT bot_id, so review bots (Cole) that ignore bot_id messages will respond. The Sine app's user_token canNOT do this because Sine has a bot user. Scopes: chat:write, groups:read, groups:history, channels:read, channels:history.",
+  "trigger_token": "",
+
   "_guide_after": "After filling: `slack whoami` (and `slack whoami --as bot` if set) to verify. File should be chmod 600."
 }

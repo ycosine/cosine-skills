@@ -42,6 +42,21 @@ thread root.
 - Reviewer: `U0AKFDZUYKH` (Cole) — `COLE_MENTION` (ID or alias).
 - Scan depth for re-review: 200 — `COLE_HISTORY_LIMIT`.
 
+## Requires a bot-less token (important)
+
+Cole ignores any message that carries a `bot_id`. A user token from a Slack app
+that has a **bot user** (like the "Sine" app used by the `slack` skill) stamps
+`bot_id` on every post, so Cole silently drops it — even though the message is
+"from you". Verified by diffing a working manual post vs an API post.
+
+The fix: post with a `trigger_token` — a user token (`xoxp-`) from a **separate
+app that has ONLY User Token Scopes and no bot user**. Such posts carry `app_id`
+but no `bot_id`, so Cole responds (this is how the team's own sending tool works).
+Set it in `~/.config/slack-skill/config.json` → `trigger_token` (or `COLE_TOKEN`
+env). Required scopes on that app: `chat:write`, `groups:read`, `groups:history`,
+`channels:read`, `channels:history`. Without it, `cole` warns and Cole will
+ignore the message.
+
 ## Notes
 
 - Posts as **the user** (the team triggers Cole as themselves), never as a bot.
