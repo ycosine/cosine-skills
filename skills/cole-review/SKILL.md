@@ -42,20 +42,19 @@ thread root.
 - Reviewer: `U0AKFDZUYKH` (Cole) — `COLE_MENTION` (ID or alias).
 - Scan depth for re-review: 200 — `COLE_HISTORY_LIMIT`.
 
-## Requires a bot-less token (important)
+## Known limitation: Cole ignores `bot_id` messages
 
-Cole ignores any message that carries a `bot_id`. A user token from a Slack app
-that has a **bot user** (like the "Sine" app used by the `slack` skill) stamps
-`bot_id` on every post, so Cole silently drops it — even though the message is
-"from you". Verified by diffing a working manual post vs an API post.
+Cole drops any message carrying a `bot_id`. Posts from this `slack` skill use the
+"Sine" app's user token, which Slack stamps with that app's `bot_id`
+(app_id `A0APG0P0C7Q`, bot_id `B0ATPQB914L`) — so Cole currently does **not**
+respond to `cole`-triggered messages, only to manually-typed ones. Verified by
+diffing a manual post (no bot_id, Cole responds) vs our API post (has bot_id,
+ignored).
 
-The fix: post with a `trigger_token` — a user token (`xoxp-`) from a **separate
-app that has ONLY User Token Scopes and no bot user**. Such posts carry `app_id`
-but no `bot_id`, so Cole responds (this is how the team's own sending tool works).
-Set it in `~/.config/slack-skill/config.json` → `trigger_token` (or `COLE_TOKEN`
-env). Required scopes on that app: `chat:write`, `groups:read`, `groups:history`,
-`channels:read`, `channels:history`. Without it, `cole` warns and Cole will
-ignore the message.
+The correct fix is on **Cole's side**: ask Cole's maintainer to whitelist our
+app/user (app_id `A0APG0P0C7Q` or user `U09KQ7H9DDM`) or relax the bot_id filter.
+Once whitelisted, this skill works as-is with no changes. (The browser-session
+`xoxc/xoxd` workaround that the team's MCP uses is deliberately avoided here.)
 
 ## Notes
 
