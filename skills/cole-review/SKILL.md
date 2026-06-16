@@ -10,13 +10,15 @@ description: >-
 
 # cole-review (cole)
 
-Sends the message that makes Cole start a review. Built on the `slack` skill.
+Sends the message that makes Cole start a review, and (optionally) watches the
+thread for Cole's result. Built on the `slack` skill.
 
 ## Usage
 
 ```
 <skill-dir>/scripts/cole <pr-url>          # request a review
 <skill-dir>/scripts/cole --re <pr-url>     # request a RE-review
+<skill-dir>/scripts/cole watch ...         # poll for Cole's result (see below)
 ```
 
 - **review** → posts a top-level `@Cole review <pr-url>` in #dev-review. Cole
@@ -26,8 +28,42 @@ Sends the message that makes Cole start a review. Built on the `slack` skill.
   the team does it). Errors if no prior review thread is found — in that case do a
   plain review instead.
 
-The command prints JSON with the message `ts`/`thread_ts` and a `permalink`.
-Report the permalink so the user can watch Cole's response.
+Both trigger commands print JSON with `channel`, `ts`, `thread_ts`, `since` (the
+trigger ts), a `permalink`, and a ready-to-run `watch_cmd`. Report the permalink
+so the user can watch Cole's response.
+
+## Watching for the result (the standard flow)
+
+After triggering, **launch the watcher in the background** so the agent is
+re-invoked with Cole's review once it lands — don't block the turn:
+
+1. Run the trigger in the foreground; capture `channel`, `thread_ts`, `since`,
+   `permalink`. Report the permalink to the user.
+2. Run the printed `watch_cmd` (or build it) **with `run_in_background: true`**:
+
+   ```
+   <skill-dir>/scripts/cole watch --channel <ch> --thread <thread_ts> \
+     --since <since_ts> --github <pr-url> --timeout 600 --interval 30
+   ```
+
+   It polls the Slack thread for replies from Cole (`U0AKFDZUYKH`) newer than
+   `--since`, and — with `--github` — also the PR's reviews/comments (Cole's
+   GitHub login is `cole-reahai`). It exits as soon as Cole responds on either
+   channel, or after `--timeout` seconds.
+3. When the background command exits, read its JSON and summarize Cole's
+   findings/suggestions for the user.
+
+The watcher's exit JSON:
+
+- `status: "responded"` → `slack_replies` (Cole's thread messages) and
+  `github_new` (reviews/comments newer than when the watch started). Summarize
+  these into actionable suggestions.
+- `status: "timeout"` → Cole hasn't answered within the window. Surface that and
+  offer to keep watching (re-run with a longer `--timeout`).
+
+`watch` is read-only — it never posts, so it's safe to run/re-run freely (unlike
+the triggers). Tune `--delay` to wait before the first poll, `--interval` for
+poll cadence, `--timeout` for how long to wait.
 
 ## How it identifies the PR / thread
 
@@ -59,5 +95,6 @@ Once whitelisted, this skill works as-is with no changes. (The browser-session
 ## Notes
 
 - Posts as **the user** (the team triggers Cole as themselves), never as a bot.
-- This is fire-and-forget: it does not wait for or read Cole's review.
+- The trigger is fire-and-forget; use `cole watch` (above) to read back Cole's
+  result. Run the watcher in the background so it doesn't block the turn.
 - Do not paste extra prose into the URL argument — pass a clean PR link.

@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
-"""cole — trigger Cole (the review bot) on a PR in the #dev-review channel.
+"""cole — trigger Cole (the review bot) on a PR in the #dev-review channel,
+and optionally watch the thread for Cole's review result.
 
-This skill ONLY sends the trigger message; it does not perform any review.
+This skill only sends the trigger and reads back the reply; it does not
+perform any review itself.
 
   cole <pr-url>            post a top-level "@Cole review <url>" request
   cole --re <pr-url>       find that PR's existing review thread and post
                            "@Cole re-review" inside it
+  cole watch ...           poll a thread (and optionally the PR) for Cole's
+                           review result — see `cole watch -h`
+
+Both trigger commands print JSON that includes `thread_ts`, `channel` and
+`since` so a watcher can be launched precisely:
+
+  cole watch --channel <ch> --thread <thread_ts> --since <since_ts>
 
 Overridable via env:
   COLE_CHANNEL  target channel (default C0AL1106NJJ / #dev-review)
   COLE_MENTION  who to @ (default U0AKFDZUYKH / Cole) — ID or alias
+  COLE_USER_ID  Cole's user ID for reply detection (default U0AKFDZUYKH)
   SLACK_CLI     path to the slack CLI
 """
 import argparse
@@ -18,10 +28,12 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 SLACK = os.environ.get("SLACK_CLI", os.path.expanduser("~/.claude/skills/slack/scripts/slack"))
 CHANNEL = os.environ.get("COLE_CHANNEL", "C0AL1106NJJ")
 COLE = os.environ.get("COLE_MENTION", "U0AKFDZUYKH")
+COLE_USER_ID = os.environ.get("COLE_USER_ID", "U0AKFDZUYKH")
 HISTORY_LIMIT = int(os.environ.get("COLE_HISTORY_LIMIT", "200"))
 
 PR_RE = re.compile(r"github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)")
@@ -49,11 +61,20 @@ def pr_parts(url):
     return (m.group(1), m.group(2)) if m else (None, None)  # (repo, number)
 
 
+def find_thread_root(repo, num):
+    """Newest top-level channel message referencing this PR, or None."""
+    needle = re.compile(rf"{re.escape(repo)}/pull/{num}(?![0-9])")
+    hist = slack("read", "--channel", CHANNEL, "--limit", str(HISTORY_LIMIT))
+    return next((m for m in hist["messages"] if needle.search(m.get("text") or "")), None)
+
+
 def cmd_review(url):
     out = slack("post", "--channel", CHANNEL, "--mention", COLE, "--text", f"review {url}")
+    ts = out["ts"]
     print(json.dumps(
-        {"ok": True, "action": "review", "pr": url, "ts": out["ts"],
-         "permalink": out.get("permalink")},
+        {"ok": True, "action": "review", "pr": url, "channel": CHANNEL,
+         "ts": ts, "thread_ts": ts, "since": ts, "permalink": out.get("permalink"),
+         "watch_cmd": _watch_cmd(ts, ts, url)},
         ensure_ascii=False, indent=2))
 
 
@@ -61,10 +82,7 @@ def cmd_rereview(url):
     repo, num = pr_parts(url)
     if not repo:
         die(f"not a recognizable GitHub PR url: {url!r}")
-    # Find the most recent top-level message in the channel that references this PR.
-    needle = re.compile(rf"{re.escape(repo)}/pull/{num}(?![0-9])")
-    hist = slack("read", "--channel", CHANNEL, "--limit", str(HISTORY_LIMIT))
-    root = next((m for m in hist["messages"] if needle.search(m.get("text") or "")), None)
+    root = find_thread_root(repo, num)
     if not root:
         die(f"no existing review thread found for {repo}#{num} in the last "
             f"{HISTORY_LIMIT} messages — post a fresh review instead (drop --re).",
@@ -72,12 +90,136 @@ def cmd_rereview(url):
     out = slack("post", "--channel", CHANNEL, "--thread", root["ts"],
                 "--mention", COLE, "--text", "re-review")
     print(json.dumps(
-        {"ok": True, "action": "re-review", "pr": url, "thread_ts": root["ts"],
-         "permalink": out.get("permalink")},
+        {"ok": True, "action": "re-review", "pr": url, "channel": CHANNEL,
+         "ts": out["ts"], "thread_ts": root["ts"], "since": out["ts"],
+         "permalink": out.get("permalink"),
+         "watch_cmd": _watch_cmd(root["ts"], out["ts"], url)},
         ensure_ascii=False, indent=2))
 
 
+def _watch_cmd(thread_ts, since_ts, url):
+    return (f"{sys.argv[0]} watch --channel {CHANNEL} --thread {thread_ts} "
+            f"--since {since_ts} --github {url}")
+
+
+# ── watch ──────────────────────────────────────────────────────────────────
+
+def cole_replies(channel, thread_ts, since_ts):
+    """Cole's replies in the thread that are newer than since_ts."""
+    out = slack("thread", "--channel", channel, "--ts", thread_ts)
+    out_msgs = []
+    for m in out.get("messages", []):
+        ts = m.get("ts") or ""
+        if m.get("user") == COLE_USER_ID and (not since_ts or ts > since_ts):
+            out_msgs.append({"ts": ts, "text": m.get("text")})
+    return out_msgs
+
+
+def gh_items(url):
+    """Best-effort: reviews + issue comments on the PR via gh. None if gh fails."""
+    r = subprocess.run(["gh", "pr", "view", url, "--json", "reviews,comments"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None
+    try:
+        data = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None
+    items = []
+    for rv in (data.get("reviews") or []):
+        if not (rv.get("body") or "").strip() and rv.get("state") in (None, "COMMENTED"):
+            continue
+        items.append({"kind": "review", "author": (rv.get("author") or {}).get("login"),
+                      "at": rv.get("submittedAt"), "state": rv.get("state"),
+                      "body": rv.get("body")})
+    for c in (data.get("comments") or []):
+        items.append({"kind": "comment", "author": (c.get("author") or {}).get("login"),
+                      "at": c.get("createdAt"), "body": c.get("body")})
+    return items
+
+
+def _gh_key(i):
+    return (i.get("kind"), i.get("author"), i.get("at"))
+
+
+def cmd_watch(args):
+    channel = args.channel or CHANNEL
+    thread_ts = args.thread
+    if not thread_ts:
+        repo, num = pr_parts(args.pr or "")
+        if not repo:
+            die("watch needs --thread <ts>, or a PR url to locate the thread")
+        root = find_thread_root(repo, num)
+        if not root:
+            die(f"no review thread found for {repo}#{num} — was a review posted?")
+        thread_ts = root["ts"]
+
+    # GitHub baseline = the items already on the PR when watching begins. We key
+    # by (kind, author, at) and treat anything NOT in the baseline as new. The
+    # baseline is set by the first SUCCESSFUL gh read (gh_items returns None on
+    # failure), so a slow/failed first call never makes existing items look new.
+    track_gh = bool(args.github and args.pr)
+    gh_baseline = None  # None = not established yet
+    if track_gh:
+        first = gh_items(args.pr)
+        if first is not None:
+            gh_baseline = {_gh_key(i) for i in first}
+
+    if args.delay:
+        time.sleep(args.delay)
+
+    deadline = time.monotonic() + args.timeout
+    polls = 0
+    while True:
+        polls += 1
+        replies = cole_replies(channel, thread_ts, args.since)
+        gh_new = []
+        if track_gh:
+            cur = gh_items(args.pr)
+            if cur is not None:
+                if gh_baseline is None:        # first success — establish baseline
+                    gh_baseline = {_gh_key(i) for i in cur}
+                else:
+                    gh_new = [i for i in cur if _gh_key(i) not in gh_baseline]
+
+        if replies or gh_new:
+            print(json.dumps(
+                {"ok": True, "status": "responded", "channel": channel,
+                 "thread_ts": thread_ts, "polls": polls,
+                 "slack_replies": replies, "github_new": gh_new},
+                ensure_ascii=False, indent=2))
+            return
+
+        if time.monotonic() >= deadline:
+            print(json.dumps(
+                {"ok": True, "status": "timeout", "channel": channel,
+                 "thread_ts": thread_ts, "polls": polls,
+                 "waited_seconds": args.timeout,
+                 "note": "Cole has not responded yet — check the thread manually, "
+                         "or re-run watch with a longer --timeout. NOTE: Cole "
+                         "currently ignores bot_id-stamped posts, so cole-triggered "
+                         "reviews may never get a reply until Cole whitelists us."},
+                ensure_ascii=False, indent=2))
+            return
+
+        time.sleep(args.interval)
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "watch":
+        w = argparse.ArgumentParser(prog="cole watch",
+                                    description="Poll a thread (and optionally the PR) for Cole's review result.")
+        w.add_argument("pr", nargs="?", help="PR URL (used to locate the thread and for --github)")
+        w.add_argument("--channel", help=f"channel (default {CHANNEL})")
+        w.add_argument("--thread", help="thread_ts to watch (else located from the PR url)")
+        w.add_argument("--since", help="only count Cole replies newer than this ts (the trigger ts)")
+        w.add_argument("--github", action="store_true", help="also poll the PR's GitHub reviews/comments")
+        w.add_argument("--timeout", type=int, default=600, help="give up after N seconds (default 600)")
+        w.add_argument("--interval", type=int, default=30, help="poll every N seconds (default 30)")
+        w.add_argument("--delay", type=int, default=0, help="wait N seconds before the first poll")
+        cmd_watch(w.parse_args(sys.argv[2:]))
+        return
+
     p = argparse.ArgumentParser(prog="cole", description="Trigger Cole to review a PR.")
     p.add_argument("url", help="GitHub PR URL")
     p.add_argument("--re-review", "--re", dest="rereview", action="store_true",

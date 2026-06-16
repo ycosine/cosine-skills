@@ -42,7 +42,14 @@ Claude  ──shell──▶  agent-browser  ──CDP (ws://localhost:9222)─�
 
 ## Prerequisites (usually already present)
 
-- Chrome installed (macOS: `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`).
+- Chrome Canary installed (macOS: `/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary`).
+  **Use Canary, not the daily Google Chrome.** Canary is a distinct app bundle
+  (`com.google.Chrome.canary`), so the agent instance never steals "open link"
+  events from your real Chrome. A separate `--user-data-dir` alone does NOT
+  prevent that — macOS routes URL opens by bundle id, so a same-bundle agent
+  instance hijacks every link open. Plain Google Chrome
+  (`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`) works as a
+  fallback only if Canary isn't installed.
 - `agent-browser` CLI on PATH (macOS pnpm install: `~/Library/pnpm/agent-browser`).
   Verify: `agent-browser --version`. It has native CDP support (`connect`,
   `get cdp-url`). **Nothing else needs installing.**
@@ -74,7 +81,7 @@ notifications). Drive it purely over CDP; the user can't see/click it.
 
 ```bash
 pkill -f "user-data-dir=/tmp/chrome-cdp" 2>/dev/null; sleep 1   # clear stragglers
-nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+nohup "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary" \
   --headless=new \
   --remote-debugging-port=9222 \
   --user-data-dir=/tmp/chrome-cdp \
