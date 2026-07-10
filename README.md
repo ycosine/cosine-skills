@@ -1,4 +1,4 @@
-# Personal Skills
+# cosine-skills
 
 个人常用的 Claude Code skills 集合，附带安装脚本。
 
@@ -19,7 +19,7 @@
 ## 新电脑配置
 
 ```bash
-git clone <repo-url> && cd sine
+git clone <repo-url> && cd cosine-skills
 ./install.sh
 # 填入 Slack token（二选一）：
 $EDITOR ~/.config/slack-skill/config.json          # 直接改模板里的 user_token / bot_token
@@ -29,7 +29,7 @@ slack whoami                                        # 验证
 
 > 仓库**不含 token**（`config.json` 在 .gitignore 里）。新机器上重新填一次即可；
 > token 是 workspace 级的，和旧机器一样。通讯录 `people.json` 会从模板预置
-> `xianjun`/`cole`，可继续 `slack people --add`。
+> `xianjun`/`workbench`，可继续 `slack people --add`。
 
 需要 `python3`、`git`。所有频道/用户 ID 等默认值是 workspace 级的，换机器不变。
 
@@ -77,15 +77,18 @@ notify-me --no-mention 已开始长任务，完成后再 @ 你   # 只记录、�
 默认发到 `#mole-tasks` 并 @ 你；可用 `NOTIFY_CHANNEL` / `NOTIFY_USER_ID` /
 `NOTIFY_AS` 覆盖。
 
-### cole-review（cole）
-触发 Cole（review 机器人）在 `#dev-review` 审 PR。只发触发消息，不参与 review。
+### cole-review（Workbench）
+触发 Workbench（原 Cole review 机器人）在 `#dev-review` 审 PR。只发触发消息，不参与 review。
 详见 [`skills/cole-review/SKILL.md`](skills/cole-review/SKILL.md)。
 
 ```bash
-cole https://github.com/ReahPlatform/reah-agent/pull/313        # 请求 review
-cole --re https://github.com/ReahPlatform/reah-agent/pull/313   # 在原 thread 里请求 re-review
+cole https://github.com/ReahPlatform/reah-agent/pull/313         # 请求 review
+cole --re https://github.com/ReahPlatform/reah-agent/pull/313    # 在原 thread 里请求 re-review
+cole --loop https://github.com/ReahPlatform/reah-agent/pull/313  # review loop（少用）
 ```
-re-review 会按 `<repo>/pull/<号>` 找到该 PR 的既有 review thread，在其中回复。
+`workbench` 也可作为 `cole` 的命令别名使用。`--re` 会按 `<repo>/pull/<号>` 找到该
+PR 的既有 review thread，在其中回复 re-review；`--loop` 是让 Workbench 审完还
+自己修问题，一般不需要，仅在明确要求时使用。
 
 ### chrome-access
 用 Chrome DevTools Protocol（CDP）驱动本地 Chrome：读 DOM、跑 JS、抓无障碍树、

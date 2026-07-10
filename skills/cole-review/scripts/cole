@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""cole — trigger Cole (the review bot) on a PR in the #dev-review channel,
-and optionally watch the thread for Cole's review result.
+"""cole — trigger Workbench (the review bot) on a PR in the #dev-review channel,
+and optionally watch the thread for Workbench's review result.
 
 This skill only sends the trigger and reads back the reply; it does not
 perform any review itself.
 
-  cole <pr-url>            post a top-level "@Cole review <url>" request
-  cole --re <pr-url>       find that PR's existing review thread and post
-                           "@Cole re-review" inside it
-  cole watch ...           poll a thread (and optionally the PR) for Cole's
+  cole <pr-url>            post a top-level "@Workbench review <url>" request
+  cole --loop <pr-url>     post a top-level "@Workbench review loop <url>" request
+                           (loop = Workbench also fixes findings; rarely needed)
+  cole --re <pr-url>       reply "@Workbench re-review <url>" in the PR's
+                           existing review thread
+  cole watch ...           poll a thread (and optionally the PR) for Workbench's
                            review result — see `cole watch -h`
 
 Both trigger commands print JSON that includes `thread_ts`, `channel` and
@@ -17,10 +19,12 @@ Both trigger commands print JSON that includes `thread_ts`, `channel` and
   cole watch --channel <ch> --thread <thread_ts> --since <since_ts>
 
 Overridable via env:
-  COLE_CHANNEL  target channel (default C0AL1106NJJ / #dev-review)
-  COLE_MENTION  who to @ (default U0AKFDZUYKH / Cole) — ID or alias
-  COLE_USER_ID  Cole's user ID for reply detection (default U0AKFDZUYKH)
-  SLACK_CLI     path to the slack CLI
+  WORKBENCH_CHANNEL  target channel (default C0AL1106NJJ / #dev-review)
+  WORKBENCH_MENTION  who to @ (default U0B4LQPNMKQ / Workbench) — ID or alias
+  WORKBENCH_USER_ID  Workbench's user ID for reply detection (default U0B4LQPNMKQ)
+  SLACK_CLI          path to the slack CLI
+
+Legacy COLE_* env vars are still accepted as fallbacks.
 """
 import argparse
 import json
@@ -31,10 +35,10 @@ import sys
 import time
 
 SLACK = os.environ.get("SLACK_CLI", os.path.expanduser("~/.claude/skills/slack/scripts/slack"))
-CHANNEL = os.environ.get("COLE_CHANNEL", "C0AL1106NJJ")
-COLE = os.environ.get("COLE_MENTION", "U0AKFDZUYKH")
-COLE_USER_ID = os.environ.get("COLE_USER_ID", "U0AKFDZUYKH")
-HISTORY_LIMIT = int(os.environ.get("COLE_HISTORY_LIMIT", "200"))
+CHANNEL = os.environ.get("WORKBENCH_CHANNEL") or os.environ.get("COLE_CHANNEL", "C0AL1106NJJ")
+REVIEWER = os.environ.get("WORKBENCH_MENTION") or os.environ.get("COLE_MENTION", "U0B4LQPNMKQ")
+REVIEWER_USER_ID = os.environ.get("WORKBENCH_USER_ID") or os.environ.get("COLE_USER_ID", "U0B4LQPNMKQ")
+HISTORY_LIMIT = int(os.environ.get("WORKBENCH_HISTORY_LIMIT") or os.environ.get("COLE_HISTORY_LIMIT", "200"))
 
 PR_RE = re.compile(r"github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)")
 
@@ -68,32 +72,37 @@ def find_thread_root(repo, num):
     return next((m for m in hist["messages"] if needle.search(m.get("text") or "")), None)
 
 
-def cmd_review(url):
-    out = slack("post", "--channel", CHANNEL, "--mention", COLE, "--text", f"review {url}")
+def cmd_review(url, *, loop=False):
+    action = "review-loop" if loop else "review"
+    text = f"review loop {url}" if loop else f"review {url}"
+    out = slack("post", "--channel", CHANNEL, "--mention", REVIEWER, "--text", text)
     ts = out["ts"]
     print(json.dumps(
-        {"ok": True, "action": "review", "pr": url, "channel": CHANNEL,
+        {"ok": True, "action": action, "pr": url, "channel": CHANNEL,
          "ts": ts, "thread_ts": ts, "since": ts, "permalink": out.get("permalink"),
          "watch_cmd": _watch_cmd(ts, ts, url)},
         ensure_ascii=False, indent=2))
 
 
 def cmd_rereview(url):
+    """Re-review is a reply in the PR's existing review thread, not a new
+    top-level message — Workbench keeps context that way."""
     repo, num = pr_parts(url)
     if not repo:
         die(f"not a recognizable GitHub PR url: {url!r}")
     root = find_thread_root(repo, num)
     if not root:
-        die(f"no existing review thread found for {repo}#{num} in the last "
-            f"{HISTORY_LIMIT} messages — post a fresh review instead (drop --re).",
-            pr=url)
-    out = slack("post", "--channel", CHANNEL, "--thread", root["ts"],
-                "--mention", COLE, "--text", "re-review")
+        die(f"no existing review thread found for {repo}#{num} — "
+            f"run a plain review first (cole <pr-url>)")
+    thread_ts = root["ts"]
+    out = slack("post", "--channel", CHANNEL, "--thread", thread_ts,
+                "--mention", REVIEWER, "--text", f"re-review {url}")
+    ts = out["ts"]
     print(json.dumps(
         {"ok": True, "action": "re-review", "pr": url, "channel": CHANNEL,
-         "ts": out["ts"], "thread_ts": root["ts"], "since": out["ts"],
+         "ts": ts, "thread_ts": thread_ts, "since": ts,
          "permalink": out.get("permalink"),
-         "watch_cmd": _watch_cmd(root["ts"], out["ts"], url)},
+         "watch_cmd": _watch_cmd(thread_ts, ts, url)},
         ensure_ascii=False, indent=2))
 
 
@@ -104,13 +113,13 @@ def _watch_cmd(thread_ts, since_ts, url):
 
 # ── watch ──────────────────────────────────────────────────────────────────
 
-def cole_replies(channel, thread_ts, since_ts):
-    """Cole's replies in the thread that are newer than since_ts."""
+def reviewer_replies(channel, thread_ts, since_ts):
+    """Workbench's replies in the thread that are newer than since_ts."""
     out = slack("thread", "--channel", channel, "--ts", thread_ts)
     out_msgs = []
     for m in out.get("messages", []):
         ts = m.get("ts") or ""
-        if m.get("user") == COLE_USER_ID and (not since_ts or ts > since_ts):
+        if m.get("user") == REVIEWER_USER_ID and (not since_ts or ts > since_ts):
             out_msgs.append({"ts": ts, "text": m.get("text")})
     return out_msgs
 
@@ -172,7 +181,7 @@ def cmd_watch(args):
     polls = 0
     while True:
         polls += 1
-        replies = cole_replies(channel, thread_ts, args.since)
+        replies = reviewer_replies(channel, thread_ts, args.since)
         gh_new = []
         if track_gh:
             cur = gh_items(args.pr)
@@ -195,10 +204,8 @@ def cmd_watch(args):
                 {"ok": True, "status": "timeout", "channel": channel,
                  "thread_ts": thread_ts, "polls": polls,
                  "waited_seconds": args.timeout,
-                 "note": "Cole has not responded yet — check the thread manually, "
-                         "or re-run watch with a longer --timeout. NOTE: Cole "
-                         "currently ignores bot_id-stamped posts, so cole-triggered "
-                         "reviews may never get a reply until Cole whitelists us."},
+                 "note": "Workbench has not responded yet — check the thread manually, "
+                         "or re-run watch with a longer --timeout."},
                 ensure_ascii=False, indent=2))
             return
 
@@ -208,11 +215,11 @@ def cmd_watch(args):
 def main():
     if len(sys.argv) > 1 and sys.argv[1] == "watch":
         w = argparse.ArgumentParser(prog="cole watch",
-                                    description="Poll a thread (and optionally the PR) for Cole's review result.")
+                                    description="Poll a thread (and optionally the PR) for Workbench's review result.")
         w.add_argument("pr", nargs="?", help="PR URL (used to locate the thread and for --github)")
         w.add_argument("--channel", help=f"channel (default {CHANNEL})")
         w.add_argument("--thread", help="thread_ts to watch (else located from the PR url)")
-        w.add_argument("--since", help="only count Cole replies newer than this ts (the trigger ts)")
+        w.add_argument("--since", help="only count Workbench replies newer than this ts (the trigger ts)")
         w.add_argument("--github", action="store_true", help="also poll the PR's GitHub reviews/comments")
         w.add_argument("--timeout", type=int, default=600, help="give up after N seconds (default 600)")
         w.add_argument("--interval", type=int, default=30, help="poll every N seconds (default 30)")
@@ -220,12 +227,20 @@ def main():
         cmd_watch(w.parse_args(sys.argv[2:]))
         return
 
-    p = argparse.ArgumentParser(prog="cole", description="Trigger Cole to review a PR.")
+    p = argparse.ArgumentParser(prog="cole", description="Trigger Workbench to review a PR.")
     p.add_argument("url", help="GitHub PR URL")
+    p.add_argument("--loop", action="store_true",
+                   help="Review loop: Workbench reviews AND fixes the findings itself. "
+                        "Rarely needed — use only when explicitly asked.")
     p.add_argument("--re-review", "--re", dest="rereview", action="store_true",
-                   help="Re-review: post into the PR's existing review thread")
+                   help="Re-review: reply in the PR's existing review thread")
     args = p.parse_args()
-    (cmd_rereview if args.rereview else cmd_review)(args.url)
+    if args.rereview and args.loop:
+        die("--loop cannot be combined with --re-review")
+    if args.rereview:
+        cmd_rereview(args.url)
+    else:
+        cmd_review(args.url, loop=args.loop)
 
 
 if __name__ == "__main__":
