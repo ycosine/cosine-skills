@@ -22,6 +22,7 @@ Overridable via env:
   WORKBENCH_CHANNEL  target channel (default C0AL1106NJJ / #dev-review)
   WORKBENCH_MENTION  who to @ (default U0B4LQPNMKQ / Workbench) — ID or alias
   WORKBENCH_USER_ID  Workbench's user ID for reply detection (default U0B4LQPNMKQ)
+  WORKBENCH_MAX_REREVIEWS  re-review rounds per thread before refusing (default 4)
   SLACK_CLI          path to the slack CLI
 
 Legacy COLE_* env vars are still accepted as fallbacks.
@@ -39,6 +40,7 @@ CHANNEL = os.environ.get("WORKBENCH_CHANNEL") or os.environ.get("COLE_CHANNEL", 
 REVIEWER = os.environ.get("WORKBENCH_MENTION") or os.environ.get("COLE_MENTION", "U0B4LQPNMKQ")
 REVIEWER_USER_ID = os.environ.get("WORKBENCH_USER_ID") or os.environ.get("COLE_USER_ID", "U0B4LQPNMKQ")
 HISTORY_LIMIT = int(os.environ.get("WORKBENCH_HISTORY_LIMIT") or os.environ.get("COLE_HISTORY_LIMIT", "200"))
+MAX_REREVIEWS = int(os.environ.get("WORKBENCH_MAX_REREVIEWS", "4"))
 
 PR_RE = re.compile(r"github\.com/[^/\s]+/([^/\s]+)/pull/(\d+)")
 
@@ -84,7 +86,18 @@ def cmd_review(url, *, loop=False):
         ensure_ascii=False, indent=2))
 
 
-def cmd_rereview(url):
+def count_rereview_triggers(thread_ts):
+    """How many re-review triggers were already posted in this thread
+    (messages not from Workbench that ask for a re-review)."""
+    out = slack("thread", "--channel", CHANNEL, "--ts", thread_ts)
+    return sum(
+        1 for m in out.get("messages", [])
+        if m.get("user") != REVIEWER_USER_ID
+        and "re-review" in (m.get("text") or "").lower()
+    )
+
+
+def cmd_rereview(url, *, force=False):
     """Re-review is a reply in the PR's existing review thread, not a new
     top-level message — Workbench keeps context that way."""
     repo, num = pr_parts(url)
@@ -95,6 +108,14 @@ def cmd_rereview(url):
         die(f"no existing review thread found for {repo}#{num} — "
             f"run a plain review first (cole <pr-url>)")
     thread_ts = root["ts"]
+    prior = count_rereview_triggers(thread_ts)
+    if prior >= MAX_REREVIEWS and not force:
+        die(f"this thread already has {prior} re-review rounds (limit {MAX_REREVIEWS}) — "
+            f"Workbench and the agent may be stuck challenging each other in a loop. "
+            f"STOP and ask a human to arbitrate; only re-run with --force if the "
+            f"human explicitly approves another round.",
+            rereview_rounds=prior, limit=MAX_REREVIEWS,
+            channel=CHANNEL, thread_ts=thread_ts)
     out = slack("post", "--channel", CHANNEL, "--thread", thread_ts,
                 "--mention", REVIEWER, "--text", f"re-review {url}")
     ts = out["ts"]
@@ -234,11 +255,14 @@ def main():
                         "Rarely needed — use only when explicitly asked.")
     p.add_argument("--re-review", "--re", dest="rereview", action="store_true",
                    help="Re-review: reply in the PR's existing review thread")
+    p.add_argument("--force", action="store_true",
+                   help=f"Post a re-review even past the {MAX_REREVIEWS}-round limit "
+                        f"(only with explicit human approval)")
     args = p.parse_args()
     if args.rereview and args.loop:
         die("--loop cannot be combined with --re-review")
     if args.rereview:
-        cmd_rereview(args.url)
+        cmd_rereview(args.url, force=args.force)
     else:
         cmd_review(args.url, loop=args.loop)
 

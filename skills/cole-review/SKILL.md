@@ -28,7 +28,7 @@ the thread for Workbench's result. Built on the `slack` skill.
   `@Workbench re-review <pr-url>` **inside the PR's existing review thread**
   (located by scanning the channel for the PR link), so Workbench keeps the
   context of the earlier review. Errors if no prior review thread exists — run
-  a plain review in that case.
+  a plain review in that case. **Capped at 4 rounds per thread** (see below).
 - **review loop** (`--loop`) → posts a top-level
   `@Workbench review loop <pr-url>`. A loop asks Workbench to review **and fix
   the findings itself** (remediate, then re-review). Generally NOT needed —
@@ -75,6 +75,23 @@ The watcher's exit JSON:
 `watch` is read-only — it never posts, so it's safe to run/re-run freely (unlike
 the triggers). Tune `--delay` to wait before the first poll, `--interval` for
 poll cadence, `--timeout` for how long to wait.
+
+## Re-review loop guard (max 4 rounds)
+
+If a thread already has **4 re-review rounds**, `cole --re` refuses to post
+another one: at that point you and Workbench are likely stuck in an endless
+challenge loop (each round Workbench raises new or re-litigated findings, you
+push back or patch, repeat). When you hit this limit:
+
+1. **Stop triggering re-reviews.** Do not work around the guard.
+2. Summarize for the user: what's been fixed across the rounds, and which
+   findings are still contested (with your position vs Workbench's).
+3. Ask the human to arbitrate — decide whether the remaining findings are
+   real, or the PR is good enough to merge as-is.
+4. Only if the human explicitly approves another round, re-run with `--force`.
+
+The limit is per review thread and configurable via `WORKBENCH_MAX_REREVIEWS`
+(default 4).
 
 ## How it identifies the PR / thread
 
