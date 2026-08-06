@@ -31,6 +31,8 @@ python scripts/reminder_api.py list-timers --limit 20
 python scripts/reminder_api.py cancel-timer TIMER_ID
 python scripts/reminder_api.py list-schedules
 python scripts/reminder_api.py set-schedule sedentary --interval 45 --windows "10:00-12:00,14:00-18:00" --weekdays 1,2,3,4,5 --enable
+python scripts/reminder_api.py create-schedule cook-dinner --title "该做晚饭啦" --times 18:00 --weekdays 1,2,3,4,5
+python scripts/reminder_api.py delete-schedule cook-dinner
 python scripts/reminder_api.py test --title "测试" --body "Bark 已连接"
 python scripts/reminder_api.py events --limit 20
 python scripts/reminder_api.py activity

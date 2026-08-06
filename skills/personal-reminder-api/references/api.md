@@ -5,7 +5,9 @@ All endpoints except `/healthz` require `Authorization: Bearer <token>` and use 
 | Operation | Method and path | Notes |
 |---|---|---|
 | Status | `GET /api/v1/status` | Reports timezone and whether Bark is configured. |
-| List schedules | `GET /api/v1/schedules` | Includes `sedentary` and `water`. |
+| List schedules | `GET /api/v1/schedules` | Built-ins `sedentary`/`water` plus any custom schedules. |
+| Create schedule | `POST /api/v1/schedules` | Requires `id` (slug) and `title`. `times: ["10:30"]` makes a fixed-time schedule; `interval_minutes` makes an interval one. `weekdays` defaults to every day. |
+| Delete schedule | `DELETE /api/v1/schedules/{id}` | Custom schedules only; built-ins can only be disabled. |
 | Update schedule | `PUT /api/v1/schedules/{id}` | Accepts `enabled`, `interval_minutes`, `windows` (e.g. `["10:00-12:00", "14:00-18:00"]`), legacy `window_start`/`window_end`, `weekdays`, `title`, `body`, and `activity_based`. |
 | Activity state | `GET /api/v1/activity` | Reports `active`, `last_heartbeat_at`, `active_since`, and `streak_minutes`. |
 | Activity heartbeat | `POST /api/v1/activity` | Optional `source` tag. A gap over 5 minutes starts a new streak and resets activity-based schedule intervals. |

@@ -41,7 +41,8 @@ def parser():
     commands.add_parser("list-schedules")
 
     schedule = commands.add_parser("set-schedule")
-    schedule.add_argument("id", choices=["sedentary", "water"])
+    schedule.add_argument("id")
+    schedule.add_argument("--times", help='fixed local fire times, e.g. "10:30" or "11:50,18:00"')
     schedule.add_argument("--interval", type=int)
     schedule.add_argument("--start")
     schedule.add_argument("--end")
@@ -62,6 +63,18 @@ def parser():
     when.add_argument("--due-at")
     timer.add_argument("--title")
     timer.add_argument("--body")
+
+    create = commands.add_parser("create-schedule")
+    create.add_argument("id")
+    create.add_argument("--title", required=True)
+    create.add_argument("--body")
+    create.add_argument("--times", help='fixed local fire times, e.g. "10:30" or "11:50,18:00"')
+    create.add_argument("--interval", type=int)
+    create.add_argument("--windows")
+    create.add_argument("--weekdays")
+    create.add_argument("--activity-based", action="store_true")
+    delete = commands.add_parser("delete-schedule")
+    delete.add_argument("id")
 
     list_timers = commands.add_parser("list-timers")
     list_timers.add_argument("--limit", type=int, default=50)
@@ -96,6 +109,8 @@ def main():
             payload["weekdays"] = [int(day) for day in args.weekdays.split(",") if day]
         if args.windows is not None:
             payload["windows"] = [w.strip() for w in args.windows.split(",") if w.strip()]
+        if args.times is not None:
+            payload["times"] = [t.strip() for t in args.times.split(",") if t.strip()]
         if args.enable:
             payload["enabled"] = True
         if args.disable:
@@ -111,6 +126,23 @@ def main():
         if not payload:
             raise RuntimeError("Provide at least one schedule change")
         result = request("PUT", "/api/v1/schedules/" + urllib.parse.quote(args.id), payload)
+    elif args.command == "create-schedule":
+        payload = {"id": args.id, "title": args.title}
+        if args.body is not None:
+            payload["body"] = args.body
+        if args.times is not None:
+            payload["times"] = [t.strip() for t in args.times.split(",") if t.strip()]
+        if args.interval is not None:
+            payload["interval_minutes"] = args.interval
+        if args.windows is not None:
+            payload["windows"] = [w.strip() for w in args.windows.split(",") if w.strip()]
+        if args.weekdays is not None:
+            payload["weekdays"] = [int(day) for day in args.weekdays.split(",") if day]
+        if args.activity_based:
+            payload["activity_based"] = True
+        result = request("POST", "/api/v1/schedules", payload)
+    elif args.command == "delete-schedule":
+        result = request("DELETE", "/api/v1/schedules/" + urllib.parse.quote(args.id))
     elif args.command == "create-timer":
         payload = {"after_minutes": args.minutes} if args.minutes is not None else {"due_at": args.due_at}
         if args.title is not None:
