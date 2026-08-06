@@ -90,6 +90,25 @@ cole --loop https://github.com/ReahPlatform/reah-agent/pull/313  # review loop�
 PR 的既有 review thread，在其中回复 re-review；`--loop` 是让 Workbench 审完还
 自己修问题，一般不需要，仅在明确要求时使用。
 
+### cloudflare-dns
+操作 Cloudflare DNS：列 zone、增删改查 DNS 记录（A/AAAA/CNAME/TXT/MX…）、导出
+BIND 文件。纯 Python 标准库，无需 venv。详见
+[`skills/cloudflare-dns/SKILL.md`](skills/cloudflare-dns/SKILL.md)。
+
+首次使用前：
+```bash
+cp skills/cloudflare-dns/.env.example skills/cloudflare-dns/.env
+$EDITOR skills/cloudflare-dns/.env   # 填 CLOUDFLARE_API_TOKEN（和可选的 ACCOUNT_ID）
+cf-dns verify                        # 验证 token
+```
+Token 在 https://dash.cloudflare.com/profile/api-tokens 创建，权限至少
+**Zone/Zone/Read + Zone/DNS/Edit**。`.env` 已在 .gitignore 里，不会入库。
+
+核心场景（幂等，把子域指到新 IP）：
+```bash
+cf-dns upsert --zone example.com --type A --name app --content 203.0.113.7 --proxied
+```
+
 ### chrome-access
 用 Chrome DevTools Protocol（CDP）驱动本地 Chrome：读 DOM、跑 JS、抓无障碍树、
 点击/填表/导航、截图。纯指令 skill（无脚本依赖）。详见
