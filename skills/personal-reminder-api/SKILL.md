@@ -30,7 +30,7 @@ python scripts/reminder_api.py create-timer --minutes 25 --title "记得关火" 
 python scripts/reminder_api.py list-timers --limit 20
 python scripts/reminder_api.py cancel-timer TIMER_ID
 python scripts/reminder_api.py list-schedules
-python scripts/reminder_api.py set-schedule sedentary --interval 45 --start 09:00 --end 18:30 --weekdays 1,2,3,4,5 --enable
+python scripts/reminder_api.py set-schedule sedentary --interval 45 --windows "10:00-12:00,14:00-18:00" --weekdays 1,2,3,4,5 --enable
 python scripts/reminder_api.py test --title "测试" --body "Bark 已连接"
 python scripts/reminder_api.py events --limit 20
 python scripts/reminder_api.py activity

@@ -46,6 +46,7 @@ def parser():
     schedule.add_argument("--start")
     schedule.add_argument("--end")
     schedule.add_argument("--weekdays")
+    schedule.add_argument("--windows", help='e.g. "10:00-12:00,14:00-18:00"')
     state = schedule.add_mutually_exclusive_group()
     state.add_argument("--enable", action="store_true")
     state.add_argument("--disable", action="store_true")
@@ -93,6 +94,8 @@ def main():
             payload["window_end"] = args.end
         if args.weekdays is not None:
             payload["weekdays"] = [int(day) for day in args.weekdays.split(",") if day]
+        if args.windows is not None:
+            payload["windows"] = [w.strip() for w in args.windows.split(",") if w.strip()]
         if args.enable:
             payload["enabled"] = True
         if args.disable:

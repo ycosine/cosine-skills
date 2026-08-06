@@ -6,7 +6,7 @@ All endpoints except `/healthz` require `Authorization: Bearer <token>` and use 
 |---|---|---|
 | Status | `GET /api/v1/status` | Reports timezone and whether Bark is configured. |
 | List schedules | `GET /api/v1/schedules` | Includes `sedentary` and `water`. |
-| Update schedule | `PUT /api/v1/schedules/{id}` | Accepts `enabled`, `interval_minutes`, `window_start`, `window_end`, `weekdays`, `title`, `body`, and `activity_based`. |
+| Update schedule | `PUT /api/v1/schedules/{id}` | Accepts `enabled`, `interval_minutes`, `windows` (e.g. `["10:00-12:00", "14:00-18:00"]`), legacy `window_start`/`window_end`, `weekdays`, `title`, `body`, and `activity_based`. |
 | Activity state | `GET /api/v1/activity` | Reports `active`, `last_heartbeat_at`, `active_since`, and `streak_minutes`. |
 | Activity heartbeat | `POST /api/v1/activity` | Optional `source` tag. A gap over 5 minutes starts a new streak and resets activity-based schedule intervals. |
 | Test schedule | `POST /api/v1/schedules/{id}/test` | Sends immediately without changing its next run. |
