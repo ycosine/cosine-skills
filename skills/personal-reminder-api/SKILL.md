@@ -33,6 +33,12 @@ python scripts/reminder_api.py list-schedules
 python scripts/reminder_api.py set-schedule sedentary --interval 45 --start 09:00 --end 18:30 --weekdays 1,2,3,4,5 --enable
 python scripts/reminder_api.py test --title "测试" --body "Bark 已连接"
 python scripts/reminder_api.py events --limit 20
+python scripts/reminder_api.py activity
+python scripts/reminder_api.py set-schedule sedentary --activity-based
 ```
 
-Use `0` for Sunday through `6` for Saturday. Read [references/api.md](references/api.md) only when constructing an uncommon request or diagnosing validation behavior.
+Use `0` for Sunday through `6` for Saturday.
+
+## Activity-based schedules
+
+Schedules with `activityBased: true` (the sedentary reminder by default) track real sitting time instead of wall-clock intervals. The user's Mac sends a heartbeat every minute while in use (`scripts/mac-heartbeat.sh` via launchd). A heartbeat gap over 5 minutes counts as a standing break: the next heartbeat restarts the interval. While no fresh heartbeat exists (away from the computer), these schedules stay silent. Use `activity` to inspect the current streak (`active`, `streak_minutes`) — for example when the user asks "坐了多久了". If an activity-based reminder never fires, check that heartbeats are arriving before touching the schedule. Read [references/api.md](references/api.md) only when constructing an uncommon request or diagnosing validation behavior.

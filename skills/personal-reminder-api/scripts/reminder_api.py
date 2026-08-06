@@ -51,6 +51,9 @@ def parser():
     state.add_argument("--disable", action="store_true")
     schedule.add_argument("--title")
     schedule.add_argument("--body")
+    activity_mode = schedule.add_mutually_exclusive_group()
+    activity_mode.add_argument("--activity-based", action="store_true")
+    activity_mode.add_argument("--wall-clock", action="store_true")
 
     timer = commands.add_parser("create-timer")
     when = timer.add_mutually_exclusive_group(required=True)
@@ -68,6 +71,9 @@ def parser():
     test.add_argument("--body")
     events = commands.add_parser("events")
     events.add_argument("--limit", type=int, default=50)
+    commands.add_parser("activity")
+    heartbeat = commands.add_parser("heartbeat")
+    heartbeat.add_argument("--source", default="manual")
     return root
 
 
@@ -95,6 +101,10 @@ def main():
             payload["title"] = args.title
         if args.body is not None:
             payload["body"] = args.body
+        if args.activity_based:
+            payload["activity_based"] = True
+        if args.wall_clock:
+            payload["activity_based"] = False
         if not payload:
             raise RuntimeError("Provide at least one schedule change")
         result = request("PUT", "/api/v1/schedules/" + urllib.parse.quote(args.id), payload)
@@ -118,6 +128,10 @@ def main():
         result = request("POST", "/api/v1/test", payload)
     elif args.command == "events":
         result = request("GET", "/api/v1/events?limit=" + str(args.limit))
+    elif args.command == "activity":
+        result = request("GET", "/api/v1/activity")
+    elif args.command == "heartbeat":
+        result = request("POST", "/api/v1/activity", {"source": args.source})
     else:
         raise RuntimeError("Unknown command")
     print(json.dumps(result, ensure_ascii=False, indent=2))
