@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal Reminder API"
+  short_description: "Create timers and manage personal reminder schedules"
+  default_prompt: "Use $personal-reminder-api to remind me to check the stove in 25 minutes."
