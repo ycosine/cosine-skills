@@ -17,6 +17,9 @@ All endpoints except `/healthz` require `Authorization: Bearer <token>` and use 
 | Cancel timer | `DELETE /api/v1/timers/{id}` | Only pending timers can be cancelled. |
 | Test Bark | `POST /api/v1/test` | Accepts optional `title` and `body`. |
 | Events | `GET /api/v1/events?limit=50` | Returns delivery and configuration history. |
+| Health ingest | `POST /api/v1/health` | Accepts Health Auto Export JSON (`data.metrics` / `data.workouts`); upserts by metric+date. |
+| Health query | `GET /api/v1/health?metric=step_count&hours=24&limit=200` | Common metrics: `step_count`, `heart_rate` (has min/avg/max), `apple_stand_time`. |
+| Workouts | `GET /api/v1/workouts?limit=10` | Name, start/end, average and max heart rate. |
 
 Recurring schedules run only inside their configured local-time window and weekdays. Timers ignore the recurring work window. Cooking timers use Bark's time-sensitive level and alarm sound.
 

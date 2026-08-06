@@ -41,6 +41,10 @@ python scripts/reminder_api.py set-schedule sedentary --activity-based
 
 Use `0` for Sunday through `6` for Saturday.
 
+## Health data (Apple Watch via Health Auto Export)
+
+The user's iPhone pushes Apple Health data (steps, heart rate, workouts) to `POST /api/v1/health` via the Health Auto Export app. Query it with `health --metric heart_rate --hours 24` or `workouts` — for example when the user asks about their heart rate, steps, or recent workouts. After an activity-based reminder fires, the server checks ~12 minutes later: if the user is still at the computer with an unbroken activity streak and fewer than 30 steps recorded since the reminder, it sends one time-sensitive follow-up nudge. `status` reports `health_sync` freshness; stale timestamps there mean the phone app hasn't synced, not that the user was inactive.
+
 ## Activity-based schedules
 
 Schedules with `activityBased: true` (the sedentary reminder by default) track real sitting time instead of wall-clock intervals. The user's Mac sends a heartbeat every minute while in use (`scripts/mac-heartbeat.sh` via launchd). A heartbeat gap over 5 minutes counts as a standing break: the next heartbeat restarts the interval. While no fresh heartbeat exists (away from the computer), these schedules stay silent. Use `activity` to inspect the current streak (`active`, `streak_minutes`) — for example when the user asks "坐了多久了". If an activity-based reminder never fires, check that heartbeats are arriving before touching the schedule. Read [references/api.md](references/api.md) only when constructing an uncommon request or diagnosing validation behavior.

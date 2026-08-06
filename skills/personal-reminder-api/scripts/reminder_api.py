@@ -86,6 +86,12 @@ def parser():
     events = commands.add_parser("events")
     events.add_argument("--limit", type=int, default=50)
     commands.add_parser("activity")
+    health = commands.add_parser("health")
+    health.add_argument("--metric", default="step_count")
+    health.add_argument("--hours", type=int, default=24)
+    health.add_argument("--limit", type=int, default=200)
+    workouts = commands.add_parser("workouts")
+    workouts.add_argument("--limit", type=int, default=10)
     heartbeat = commands.add_parser("heartbeat")
     heartbeat.add_argument("--source", default="manual")
     return root
@@ -165,6 +171,10 @@ def main():
         result = request("GET", "/api/v1/events?limit=" + str(args.limit))
     elif args.command == "activity":
         result = request("GET", "/api/v1/activity")
+    elif args.command == "health":
+        result = request("GET", f"/api/v1/health?metric={urllib.parse.quote(args.metric)}&hours={args.hours}&limit={args.limit}")
+    elif args.command == "workouts":
+        result = request("GET", f"/api/v1/workouts?limit={args.limit}")
     elif args.command == "heartbeat":
         result = request("POST", "/api/v1/activity", {"source": args.source})
     else:
