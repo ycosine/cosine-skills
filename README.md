@@ -113,3 +113,9 @@ cf-dns upsert --zone example.com --type A --name app --content 203.0.113.7 --pro
 用 Chrome DevTools Protocol（CDP）驱动本地 Chrome：读 DOM、跑 JS、抓无障碍树、
 点击/填表/导航、截图。纯指令 skill（无脚本依赖）。详见
 [`skills/chrome-access/SKILL.md`](skills/chrome-access/SKILL.md)。
+
+### wt
+配合 [wt](https://github.com/ycosine/wt) CLI 管理 git worktree：建工作区
+（`wt new`）、读状态（`wt list --json`）、归档/恢复/删除、跑仓库配置的 run 钩子。
+纯指令 skill（无脚本依赖），需要先安装 wt 二进制（`cargo install --path .`）。
+详见 [`skills/wt/SKILL.md`](skills/wt/SKILL.md)。
