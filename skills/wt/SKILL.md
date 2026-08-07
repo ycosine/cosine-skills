@@ -12,7 +12,7 @@ description: Manage git worktrees with the wt CLI — create a workspace for a t
 | Command | Effect |
 |---|---|
 | `wt new [name] [--base <ref>] [--branch <name>] [--no-setup]` | Create a worktree. Without a name, picks an unused city name. Branch defaults to `wt/<name>`. Runs the repo's `post_create` hook unless `--no-setup`. Prints the new path on stdout. |
-| `wt list --json [--all] [--archived]` | Machine-readable listing: `repo, name, branch, path, dirty, main, archived`. `--all` covers every repo under the worktrees root. |
+| `wt list --json [--all] [--archived] [--deep]` | Machine-readable listing: `repo, name, branch, path, dirty, main, archived`. `--all` covers every repo under the worktrees root; add `--deep` to reverse-discover through git's worktree registry, including worktrees created elsewhere by hand or other tools (slower — spawns git per repo). |
 | `wt archive <name> [--force]` | Remove the worktree directory, keep the branch (recorded in state). Refuses if dirty unless `--force`. Runs `pre_archive` hook. |
 | `wt restore <name>` | Recreate an archived worktree from its kept branch; runs `post_create`. |
 | `wt rm <name> [--force]` | Remove worktree AND delete its branch. Refuses dirty / unmerged without `--force`. Also cleans up archived entries. |
