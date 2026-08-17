@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+"""reah-bugs — query the Reah "Bug Report" Notion database. Read-only.
+
+Thin wrapper over the sibling notion-read skill (shares token loading, request,
+property flattening). Success JSON → {"ok": true, ...}; failure → exit 1.
+"""
+import argparse
+import json
+import sys
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
+_NR_PATH = Path(__file__).resolve().parent.parent.parent / "notion-read" / "scripts" / "notion-read"
+nr = SourceFileLoader("notionread", str(_NR_PATH)).load_module()
+
+BUGS_DB = "29c80c5b5b4d801f8a48df5e7a7cfc06"
+# Property names as they exist in the DB — leading spaces and misspellings are real.
+P_PRIORITY = " Priority"
+P_SEVERITY = "Serverity"
+P_MODULE = "Proj Moudle"
+
+
+def resolve_person(who):
+    if who == "me":
+        import os
+        me = os.environ.get("NOTION_ME") or nr_env("NOTION_ME")
+        if not me:
+            nr.die("NOTION_ME is not set. Add NOTION_ME=<your notion user uuid> to "
+                   "~/.config/notion-skill/.env.")
+        return me
+    if len(who.replace("-", "")) == 32 and all(c in "0123456789abcdefABCDEF-" for c in who):
+        return who
+    nr.die(f"--owner takes 'me' or a UUID, got '{who}'.")
+
+
+def nr_env(key):
+    """Read a key from the same .env files notion-read uses for its token."""
+    import os
+    for p in (Path(os.environ.get("NOTION_ENV_FILE") or "/nonexistent"),
+              _NR_PATH.parent.parent / ".env",
+              Path.home() / ".config" / "notion-skill" / ".env"):
+        if not p.is_file():
+            continue
+        for line in p.read_text().splitlines():
+            k, _, v = line.strip().partition("=")
+            if k.strip() == key and v.strip():
+                return v.strip().strip('"').strip("'")
+    return None
+
+
+def cmd_comments(args):
+    oid = nr.extract_id(args.target)
+    out, cursor = [], None
+    while True:
+        path = f"/comments?block_id={oid}&page_size=100" + (f"&start_cursor={cursor}" if cursor else "")
+        data = nr.request("GET", path)
+        if data.get("object") == "error":
+            nr.die(data.get("message", "comments fetch failed"))
+        for c in data["results"]:
+            author = (c.get("display_name") or {}).get("resolved_name") or c["created_by"]["id"]
+            out.append({"created": c["created_time"], "author": author,
+                        "text": nr.rt(c["rich_text"])})
+        if not data.get("has_more"):
+            break
+        cursor = data["next_cursor"]
+    print(json.dumps({"ok": True, "comments": out}, ensure_ascii=False, indent=2))
+
+
+def my_name():
+    u = nr.request("GET", f"/users/{resolve_person('me')}")
+    return u.get("name") if u.get("object") == "user" else None
+
+
+def cmd_comment(args):
+    oid = nr.extract_id(args.target)
+    text = args.text
+    if not args.no_prefix:
+        name = my_name()
+        if name:
+            text = f"【{name}】{text}"
+    data = nr.request("POST", "/comments", {
+        "parent": {"page_id": oid},
+        "rich_text": [{"text": {"content": text}}],
+    })
+    if data.get("object") == "error":
+        nr.die(data.get("message", "comment failed"))
+    print(json.dumps({"ok": True, "comment_id": data["id"],
+                      "as": (data.get("display_name") or {}).get("resolved_name"),
+                      "created": data["created_time"]}, ensure_ascii=False))
+
+
+def cmd_whoami(_args):
+    me = resolve_person("me")
+    u = nr.request("GET", f"/users/{me}")
+    if u.get("object") == "error":
+        nr.die(f"NOTION_ME={me} did not resolve: " + u.get("message", ""))
+    print(json.dumps({"ok": True, "id": u["id"], "name": u.get("name"),
+                      "email": (u.get("person") or {}).get("email")},
+                     ensure_ascii=False))
+
+
+def complete_statuses():
+    """Names in the Status property's 'Complete' group, read live from the schema."""
+    db = nr.request("GET", f"/databases/{BUGS_DB}")
+    if db.get("object") == "error":
+        nr.die(db.get("message", "schema fetch failed"))
+    st = db["properties"]["Status"]["status"]
+    for g in st["groups"]:
+        if g["name"] == "Complete":
+            return [o["name"] for o in st["options"] if o["id"] in g["option_ids"]]
+    return ["Closed"]
+
+
+def build_filter(args):
+    conds = []
+    if getattr(args, "owner", None):
+        conds.append({"property": "Owner", "people": {"contains": resolve_person(args.owner)}})
+    status = getattr(args, "status", None)
+    if status:
+        conds.append({"property": "Status", "status": {"equals": status}})
+    elif not getattr(args, "all", False):
+        for name in complete_statuses():
+            conds.append({"property": "Status", "status": {"does_not_equal": name}})
+    if getattr(args, "priority", None):
+        conds.append({"property": P_PRIORITY, "select": {"equals": args.priority}})
+    if getattr(args, "severity", None):
+        conds.append({"property": P_SEVERITY, "select": {"equals": args.severity}})
+    if getattr(args, "module", None):
+        conds.append({"property": P_MODULE, "select": {"equals": args.module}})
+    if getattr(args, "env", None):
+        conds.append({"property": "Env", "multi_select": {"contains": args.env}})
+    if not conds:
+        return None
+    return conds[0] if len(conds) == 1 else {"and": conds}
+
+
+def query(args):
+    body = {"page_size": min(args.limit, 100),
+            "sorts": [{"timestamp": "created_time", "direction": "descending"}]}
+    f = build_filter(args)
+    if f:
+        body["filter"] = f
+    rows, cursor = [], None
+    while len(rows) < args.limit:
+        if cursor:
+            body["start_cursor"] = cursor
+        data = nr.request("POST", f"/databases/{BUGS_DB}/query", body)
+        if data.get("object") == "error":
+            nr.die(data.get("message", "query failed"))
+        for r in data["results"]:
+            p = nr.flatten_props(r.get("properties", {}))
+            rows.append({
+                "id": r["id"], "url": r.get("url"),
+                "title": p.get("Name"),
+                "status": p.get("Status"),
+                "priority": p.get("Priority"),
+                "severity": p.get("Serverity"),
+                "module": p.get("Proj Moudle"),
+                "server": p.get("Server"),
+                "env": p.get("Env"),
+                "owner": p.get("Owner"),
+                "created": (r.get("created_time") or "")[:10],
+            })
+        cursor = data.get("next_cursor") if data.get("has_more") else None
+        if not cursor:
+            break
+    return rows[:args.limit], bool(cursor)
+
+
+def cmd_mine(args):
+    args.owner = "me"
+    rows, more = query(args)
+    print(json.dumps({"ok": True, "count": len(rows), "has_more": more, "bugs": rows},
+                     ensure_ascii=False, indent=2))
+
+
+def cmd_list(args):
+    rows, more = query(args)
+    print(json.dumps({"ok": True, "count": len(rows), "has_more": more, "bugs": rows},
+                     ensure_ascii=False, indent=2))
+
+
+def cmd_show(args):
+    oid = nr.extract_id(args.target)
+    page = nr.request("GET", f"/pages/{oid}")
+    if page.get("object") == "error":
+        nr.die(page.get("message", "page fetch failed"))
+    props = nr.flatten_props(page.get("properties", {}))
+    print(json.dumps({"ok": True, "id": page["id"], "url": page.get("url"),
+                      "properties": props}, ensure_ascii=False, indent=2))
+    print("\n--- body (markdown) ---\n")
+    print(nr.page_markdown(oid))
+
+
+def cmd_stats(args):
+    key = args.by
+    args.limit = 10_000
+    args.owner = None
+    args.status = None
+    rows, _ = query(args)  # honors --all: default counts only non-Closed
+    counts = {}
+    for r in rows:
+        v = r.get(key)
+        for name in (v if isinstance(v, list) else [v or "(none)"]):
+            counts[name] = counts.get(name, 0) + 1
+    ordered = dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+    print(json.dumps({"ok": True, "total": len(rows), "by": key,
+                      "closed_included": args.all, "counts": ordered},
+                     ensure_ascii=False, indent=2))
+
+
+def add_common(p, with_owner=True):
+    p.add_argument("--status", help="exact Status (e.g. Open, Re-open, Closed)")
+    p.add_argument("--all", action="store_true", help="include Closed (default: exclude)")
+    p.add_argument("--priority", help="Low / Medium / High …")
+    p.add_argument("--severity", help="Minor / Major …")
+    p.add_argument("--module", help="Proj Moudle select value (e.g. Admin)")
+    p.add_argument("--env", help="Env contains (e.g. Stg / Prd)")
+    p.add_argument("--limit", type=int, default=50)
+    if with_owner:
+        p.add_argument("--owner", help='"me", a name substring, or a UUID')
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="reah-bugs")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    m = sub.add_parser("mine", help="bugs assigned to me (non-Closed by default)")
+    add_common(m, with_owner=False)
+
+    li = sub.add_parser("list", help="query bugs with filters")
+    add_common(li)
+
+    sh = sub.add_parser("show", help="full bug detail (props + body markdown)")
+    sh.add_argument("target", help="bug page URL or ID")
+
+    st = sub.add_parser("stats", help="counts grouped by a field")
+    st.add_argument("--by", default="status",
+                    choices=["status", "priority", "severity", "module", "owner", "env"])
+    st.add_argument("--all", action="store_true", help="include Closed")
+
+    sub.add_parser("whoami", help="verify NOTION_ME resolves to my Notion account")
+
+    co = sub.add_parser("comments", help="list a bug's comments")
+    co.add_argument("target", help="bug page URL or ID")
+
+    cw = sub.add_parser("comment", help="post a comment on a bug (visible to the whole team)")
+    cw.add_argument("target", help="bug page URL or ID")
+    cw.add_argument("text", help="comment text (auto-prefixed with 【<my name>】)")
+    cw.add_argument("--no-prefix", action="store_true",
+                    help="post the text verbatim without the 【name】 prefix")
+
+    args = ap.parse_args()
+    {"mine": cmd_mine, "list": cmd_list, "show": cmd_show, "stats": cmd_stats,
+     "whoami": cmd_whoami, "comments": cmd_comments, "comment": cmd_comment}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()

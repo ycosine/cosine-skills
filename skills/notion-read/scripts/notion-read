@@ -1,0 +1,350 @@
+#!/usr/bin/env python3
+"""notion-read — read-only Notion CLI. Stdlib only, prints JSON or markdown.
+
+Success JSON → {"ok": true, ...}; failure → {"ok": false, "error": "..."} + exit 1.
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+API = "https://api.notion.com/v1"
+NOTION_VERSION = "2022-06-28"
+MAX_DEPTH = 4
+
+
+def die(msg):
+    print(json.dumps({"ok": False, "error": msg}, ensure_ascii=False))
+    sys.exit(1)
+
+
+def load_token():
+    tok = os.environ.get("NOTION_TOKEN")
+    if tok:
+        return tok.strip()
+    candidates = []
+    if os.environ.get("NOTION_ENV_FILE"):
+        candidates.append(Path(os.environ["NOTION_ENV_FILE"]))
+    candidates.append(Path(__file__).resolve().parent.parent / ".env")
+    candidates.append(Path.home() / ".config" / "notion-skill" / ".env")
+    for p in candidates:
+        if not p.is_file():
+            continue
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip().lower().lstrip("export ").strip()
+            v = v.strip().strip('"').strip("'")
+            if k in ("notion_token", "token", "notion_api_key") and v:
+                return v
+    return None
+
+
+def request(method, path, body=None):
+    token = load_token()
+    if not token:
+        die("No Notion token found. Set NOTION_TOKEN, or put NOTION_TOKEN=... in "
+            "~/.config/notion-skill/.env (see SKILL.md Setup).")
+    req = urllib.request.Request(
+        API + path,
+        data=json.dumps(body).encode() if body is not None else None,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": NOTION_VERSION,
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        try:
+            payload = json.load(e)
+        except Exception:
+            payload = {"message": e.reason}
+        return {"object": "error", "status": e.code, **payload}
+    except urllib.error.URLError as e:
+        die(f"Network error reaching api.notion.com: {e.reason}. "
+            "Transient ConnectTimeout usually resolves on one retry.")
+
+
+def extract_id(s):
+    s = s.strip()
+    m = re.search(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", s)
+    if m:
+        return m.group(0).replace("-", "")
+    path_part = s.split("?")[0]
+    matches = re.findall(r"[0-9a-fA-F]{32}", path_part)
+    if matches:
+        return matches[-1]
+    die(f"Could not find a Notion ID in: {s}")
+
+
+# ---------- rich text / property rendering ----------
+
+def rt(rich_text):
+    out = []
+    for t in rich_text or []:
+        text = t.get("plain_text", "")
+        ann = t.get("annotations", {})
+        if ann.get("code"):
+            text = f"`{text}`"
+        if ann.get("bold"):
+            text = f"**{text}**"
+        href = t.get("href")
+        if href:
+            text = f"[{text}]({href})"
+        out.append(text)
+    return "".join(out)
+
+
+def prop_value(p):
+    t = p.get("type")
+    v = p.get(t)
+    if v is None:
+        return None
+    if t in ("title", "rich_text"):
+        return rt(v) or None
+    if t in ("select", "status"):
+        return v.get("name")
+    if t == "multi_select":
+        return [x["name"] for x in v] or None
+    if t == "people":
+        return [x.get("name") or x.get("id") for x in v] or None
+    if t == "date":
+        return v.get("start") + (f" → {v['end']}" if v.get("end") else "")
+    if t in ("number", "checkbox", "url", "email", "phone_number",
+             "created_time", "last_edited_time"):
+        return v
+    if t == "unique_id":
+        prefix = v.get("prefix") or ""
+        return f"{prefix}{'-' if prefix else ''}{v.get('number')}"
+    if t == "formula":
+        return v.get(v.get("type"))
+    if t == "relation":
+        return [x["id"] for x in v] or None
+    if t in ("created_by", "last_edited_by"):
+        return v.get("name") or v.get("id")
+    if t == "files":
+        return [f.get("name") for f in v] or None
+    return v
+
+
+def flatten_props(props):
+    out = {}
+    for name, p in props.items():
+        val = prop_value(p)
+        if val not in (None, "", []):
+            out[name.strip()] = val
+    return out
+
+
+# ---------- blocks → markdown ----------
+
+def fetch_children(block_id):
+    results, cursor = [], None
+    while True:
+        path = f"/blocks/{block_id}/children?page_size=100"
+        if cursor:
+            path += f"&start_cursor={cursor}"
+        data = request("GET", path)
+        if data.get("object") == "error":
+            return results  # partial content beats hard failure mid-page
+        results.extend(data.get("results", []))
+        if not data.get("has_more"):
+            return results
+        cursor = data.get("next_cursor")
+
+
+def block_md(b, depth=0):
+    t = b.get("type")
+    v = b.get(t, {})
+    indent = "  " * depth
+    text = rt(v.get("rich_text"))
+    lines = []
+    if t == "paragraph":
+        lines.append(indent + text)
+    elif t in ("heading_1", "heading_2", "heading_3"):
+        lines.append(indent + "#" * int(t[-1]) + " " + text)
+    elif t == "bulleted_list_item":
+        lines.append(indent + "- " + text)
+    elif t == "numbered_list_item":
+        lines.append(indent + "1. " + text)
+    elif t == "to_do":
+        mark = "x" if v.get("checked") else " "
+        lines.append(f"{indent}- [{mark}] {text}")
+    elif t == "toggle":
+        lines.append(indent + "- ▸ " + text)
+    elif t == "quote":
+        lines.append(indent + "> " + text)
+    elif t == "callout":
+        icon = (v.get("icon") or {}).get("emoji", "")
+        lines.append(f"{indent}> {icon} {text}")
+    elif t == "code":
+        lang = v.get("language", "")
+        lines.append(f"{indent}```{lang}\n{text}\n{indent}```")
+    elif t == "divider":
+        lines.append(indent + "---")
+    elif t == "image":
+        url = (v.get("file") or v.get("external") or {}).get("url", "")
+        lines.append(f"{indent}![image]({url})  <!-- signed URL, expires -->")
+    elif t in ("file", "pdf", "video"):
+        url = (v.get("file") or v.get("external") or {}).get("url", "")
+        lines.append(f"{indent}[{t}]({url})")
+    elif t == "bookmark":
+        lines.append(f"{indent}<{v.get('url', '')}>")
+    elif t == "child_page":
+        lines.append(f"{indent}📄 child page: {v.get('title')} (id {b['id']})")
+    elif t == "child_database":
+        lines.append(f"{indent}🗄 child database: {v.get('title')} (id {b['id']}) — read with `db {b['id']}`")
+    elif t == "table":
+        pass  # rows arrive as children below
+    elif t == "table_row":
+        cells = [rt(c) for c in v.get("cells", [])]
+        lines.append(indent + "| " + " | ".join(cells) + " |")
+    elif t == "column_list" or t == "column":
+        pass
+    elif text:
+        lines.append(indent + text)
+
+    if b.get("has_children") and t not in ("child_page", "child_database") and depth < MAX_DEPTH:
+        child_depth = depth if t in ("table", "column_list", "column") else depth + 1
+        for c in fetch_children(b["id"]):
+            lines.extend(block_md(c, child_depth))
+    return lines
+
+
+def page_markdown(page_id):
+    lines = []
+    for b in fetch_children(page_id):
+        lines.extend(block_md(b))
+    return "\n".join(lines)
+
+
+# ---------- commands ----------
+
+def cmd_verify(_args):
+    data = request("GET", "/users/me")
+    if data.get("object") == "error":
+        die(data.get("message", "verify failed"))
+    print(json.dumps({
+        "ok": True,
+        "bot": data.get("name"),
+        "workspace": (data.get("bot") or {}).get("workspace_name"),
+    }, ensure_ascii=False))
+
+
+def title_of(obj):
+    if obj.get("object") == "database":
+        return rt(obj.get("title"))
+    for p in (obj.get("properties") or {}).values():
+        if p.get("type") == "title":
+            return rt(p.get("title"))
+    return ""
+
+
+def cmd_get(args):
+    oid = extract_id(args.target)
+    page = request("GET", f"/pages/{oid}")
+    if page.get("object") == "page":
+        header = {
+            "ok": True, "type": "page", "id": page["id"], "url": page.get("url"),
+            "title": title_of(page),
+            "created": page.get("created_time"), "edited": page.get("last_edited_time"),
+            "properties": flatten_props(page.get("properties", {})),
+        }
+        print(json.dumps(header, ensure_ascii=False, indent=2))
+        print("\n--- body (markdown) ---\n")
+        print(page_markdown(oid))
+        return
+    if "is a database" in (page.get("message") or ""):
+        db = request("GET", f"/databases/{oid}")
+        if db.get("object") == "error":
+            die(db.get("message", "database retrieve failed"))
+        print(json.dumps({
+            "ok": True, "type": "database", "id": db["id"], "url": db.get("url"),
+            "title": title_of(db),
+            "properties": {k: v.get("type") for k, v in db.get("properties", {}).items()},
+            "hint": f"query rows with: notion-read db {oid} --limit 20",
+        }, ensure_ascii=False, indent=2))
+        return
+    die(page.get("message", "page retrieve failed"))
+
+
+def cmd_db(args):
+    oid = extract_id(args.target)
+    body = {"page_size": min(args.limit, 100)}
+    if args.filter:
+        body["filter"] = json.loads(args.filter)
+    if args.sorts:
+        body["sorts"] = json.loads(args.sorts)
+    else:
+        body["sorts"] = [{"timestamp": "created_time", "direction": "descending"}]
+    rows, cursor = [], None
+    while len(rows) < args.limit:
+        if cursor:
+            body["start_cursor"] = cursor
+        data = request("POST", f"/databases/{oid}/query", body)
+        if data.get("object") == "error":
+            die(data.get("message", "database query failed"))
+        for r in data.get("results", []):
+            rows.append({
+                "id": r["id"], "url": r.get("url"),
+                "created": r.get("created_time"),
+                **flatten_props(r.get("properties", {})),
+            })
+        if not data.get("has_more"):
+            cursor = None
+            break
+        cursor = data.get("next_cursor")
+    print(json.dumps({
+        "ok": True, "rows": rows[:args.limit],
+        "has_more": bool(cursor),
+    }, ensure_ascii=False, indent=2))
+
+
+def cmd_search(args):
+    body = {"query": args.query, "page_size": min(args.limit, 100)}
+    data = request("POST", "/search", body)
+    if data.get("object") == "error":
+        die(data.get("message", "search failed"))
+    hits = [{
+        "type": r.get("object"), "id": r["id"], "url": r.get("url"),
+        "title": title_of(r), "edited": r.get("last_edited_time"),
+    } for r in data.get("results", [])]
+    print(json.dumps({"ok": True, "results": hits, "has_more": data.get("has_more")},
+                     ensure_ascii=False, indent=2))
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="notion-read")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("verify", help="check the token works")
+
+    g = sub.add_parser("get", help="fetch a page (markdown) or database schema by URL/ID")
+    g.add_argument("target")
+
+    d = sub.add_parser("db", help="query database rows by URL/ID")
+    d.add_argument("target")
+    d.add_argument("--limit", type=int, default=25)
+    d.add_argument("--filter", help="Notion filter JSON")
+    d.add_argument("--sorts", help="Notion sorts JSON (default: created_time desc)")
+
+    s = sub.add_parser("search", help="search pages/databases shared with the integration")
+    s.add_argument("query")
+    s.add_argument("--limit", type=int, default=15)
+
+    args = ap.parse_args()
+    {"verify": cmd_verify, "get": cmd_get, "db": cmd_db, "search": cmd_search}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()

@@ -119,3 +119,25 @@ cf-dns upsert --zone example.com --type A --name app --content 203.0.113.7 --pro
 （`wt new`）、读状态（`wt list --json`）、归档/恢复/删除、跑仓库配置的 run 钩子。
 纯指令 skill（无脚本依赖），需要先安装 wt 二进制（`cargo install --path .`）。
 详见 [`skills/wt/SKILL.md`](skills/wt/SKILL.md)。
+
+### notion-read
+只读 Notion API 通用 CLI：`get`（page→markdown / database→schema，自动识别）、
+`db`（查数据库行，属性拍平）、`search`。纯 Python 标准库，无需 venv。详见
+[`skills/notion-read/SKILL.md`](skills/notion-read/SKILL.md)。
+
+首次使用前：
+```bash
+mkdir -p ~/.config/notion-skill
+cp skills/notion-read/.env.example ~/.config/notion-skill/.env
+$EDITOR ~/.config/notion-skill/.env   # 填 NOTION_TOKEN（internal integration token）
+notion-read verify                    # 验证 token
+```
+Integration 需要在 Notion 里被「连接」到目标页面/数据库才能读到。
+
+### reah-bugs
+Reah「Bug Report」数据库（Notion）的领域 CLI，复用 notion-read 底层：
+`mine`（指派给我的活跃 bug）、`list`（按 status/priority/module/env 筛）、
+`show`（属性+复现步骤+截图）、`stats`、`comments`/`comment`（唯一写命令，
+自动加【本人名】前缀）。需在 `~/.config/notion-skill/.env` 额外配
+`NOTION_ME=<自己的 Notion user uuid>`，用 `reah-bugs whoami` 验证。详见
+[`skills/reah-bugs/SKILL.md`](skills/reah-bugs/SKILL.md)。
