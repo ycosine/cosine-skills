@@ -109,6 +109,28 @@ Token 在 https://dash.cloudflare.com/profile/api-tokens 创建，权限至少
 cf-dns upsert --zone example.com --type A --name app --content 203.0.113.7 --proxied
 ```
 
+### cloudflare-r2
+操作 Cloudflare R2 对象存储：列/建/删 bucket，上传（大文件自动分片、每片失败重试，默认存 SHA-256）、
+下载（可校验 SHA-256）、列目录、统计大小、看元数据、删除、生成限时下载链接。纯 Python 标准库，
+SigV4 签名自己实现，不需要 aws-cli / rclone。详见 [`skills/cloudflare-r2/SKILL.md`](skills/cloudflare-r2/SKILL.md)。
+
+首次使用前：
+```bash
+cp skills/cloudflare-r2/.env.example ~/.config/cloudflare-r2-skill/.env
+$EDITOR ~/.config/cloudflare-r2-skill/.env   # 填 CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_R2_API_TOKEN
+cf-r2 selftest                               # 不需要凭证：校验签名算法
+cf-r2 verify                                 # 验证 token 与 S3 密钥
+```
+Token 在控制台 R2 → Manage API tokens → Create Account API token 创建，权限 **Admin Read & Write**。
+S3 密钥由 token 推导（Access Key ID = token id，Secret = token 值的 SHA-256），一个 token 就够。
+**DNS skill 的 token 没有 R2 权限**，两者分开配置。
+
+核心场景：
+```bash
+cf-r2 put backups daily/2026-09-27.db.zst ./2026-09-27.db.zst
+cf-r2 get backups daily/2026-09-27.db.zst --out /tmp/x.zst --verify
+```
+
 ### chrome-access
 用 Chrome DevTools Protocol（CDP）驱动本地 Chrome：读 DOM、跑 JS、抓无障碍树、
 点击/填表/导航、截图。纯指令 skill（无脚本依赖）。详见

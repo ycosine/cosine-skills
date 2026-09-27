@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Wrapper: run cf_r2_cli.py (stdlib only, no venv needed).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec python3 "$DIR/scripts/cf_r2_cli.py" "$@"
